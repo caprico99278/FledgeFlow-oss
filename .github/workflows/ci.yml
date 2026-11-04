@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["ffimg-v*", "go/v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --locked
+      - name: cargo build --release
+        run: cargo build --locked --release
+      - name: Smoke test the release binary
+        run: |
+          ./target/release/ffimg version
+          cargo run --locked --release -q -p ffimg --example synth -- "$RUNNER_TEMP/s.jpg" 640 480 --exif
+          ./target/release/ffimg inspect "$RUNNER_TEMP/s.jpg"
+          ./target/release/ffimg derive "$RUNNER_TEMP/s.jpg" --out "$RUNNER_TEMP/d.jpg" --max-edge 320
+          ./target/release/ffimg inspect "$RUNNER_TEMP/d.jpg" | grep -q '"has_metadata":false'
+
+  go:
+    name: Go (vet, test -race)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache: false # no third-party dependencies
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        run: go test -race -count=1 ./...
+      - name: Benchmarks compile and run once
+        run: go test -run '^$' -bench . -benchtime 1x ./...
+
+  leak-check:
+    name: Leak check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The patterns live in scripts/leakcheck.sh (the built-in denylist is
+      # base64-encoded). The script excludes itself and this workflow file.
+      # Optional extra patterns can be supplied via a repository secret.
+      - name: Scan the tree
+        env:
+          LEAKCHECK_EXTRA: ${{ secrets.LEAKCHECK_EXTRA }}
+        run: bash scripts/leakcheck.sh

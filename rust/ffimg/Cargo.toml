@@ -1,0 +1,31 @@
+[package]
+name = "ffimg"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+description = "Pure-Rust image validation and derivation CLI (JPEG/PNG/WebP) with a stable JSON contract"
+repository = "https://github.com/caprico99278/FledgeFlow-oss"
+keywords = ["image", "validation", "resize", "cli", "metadata"]
+categories = ["command-line-utilities", "multimedia::images"]
+publish = false
+
+[lib]
+name = "ffimg"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ffimg"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+hex = "0.4.3"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+
+# No dev-dependencies on purpose: the benchmark is a plain example
+# (`cargo run --release --example bench`) so that everything builds with the
+# x86_64-pc-windows-gnu toolchain without extra system tools.

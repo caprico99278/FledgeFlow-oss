@@ -1,0 +1,44 @@
+# Rust build output (Cargo.lock IS committed: ffimg ships a binary)
+/target/
+**/*.rs.bk
+
+# Temporary files from ffimg's atomic writes
+*.ffimg-tmp
+
+# Go
+*.test
+*.out
+/go/coverage*
+/go/*.prof
+
+# Local, never-committed extra patterns for scripts/leakcheck.sh
+.leakcheck-denylist
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Generated sample images (tests create them in the OS temp dir;
+# this guards against accidentally committing manual experiments)
+/samples/
+
+# Visual Studio / other IDEs
+.vs/
+*.suo
+*.user
+*.sln.docstates
+
+# Secrets (never commit)
+.env
+.env.*
+*.pem
+*.key
+
+# Windows
+desktop.ini
+
+# Claude Code local settings
+.claude/settings.local.json

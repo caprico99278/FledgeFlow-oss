@@ -1,0 +1,14 @@
+FledgeFlow-oss
+Copyright 2026 The FledgeFlow-oss contributors
+
+This product is licensed under the Apache License, Version 2.0
+(see the LICENSE file).
+
+This repository contains no third-party source code. Third-party
+dependencies are fetched at build time by Cargo (see Cargo.lock) and are
+distributed under their own licenses (MIT and/or Apache-2.0, among others).
+Binary distributions of ffimg statically link those dependencies; their
+license texts are available from each crate's source package.
+
+All images used by tests, examples and benchmarks are generated
+programmatically at run time; no photographs or artworks are included.

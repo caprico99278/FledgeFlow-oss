@@ -1,3 +1,7 @@
 * text=auto eol=lf
 *.sh text eol=lf
 Cargo.lock text eol=lf -diff
+
+# Windows launchers: cmd.exe needs CRLF; PowerShell 5.1 needs a UTF-8 BOM for Japanese text.
+*.cmd text eol=crlf
+*.bat text eol=crlf

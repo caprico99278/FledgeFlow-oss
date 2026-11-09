@@ -5,7 +5,8 @@
 ```
 private application                      FledgeFlow-oss (public)
   Go adapter ── exec ──────────────────▶  ffimg binary      (tag ffimg-vX.Y.Z)
-  Go code    ── import ────────────────▶  go/fsm, go/sendguard, go/structcheck (tag go/vX.Y.Z)
+  Go code    ── import ────────────────▶  go/fsm, go/sendguard, go/structcheck,
+                                          go/httpsent, go/stubnet (tag go/vX.Y.Z)
 
   (no arrow in the opposite direction)
 ```
@@ -83,6 +84,32 @@ LLM などの信頼できない生成元の構造化出力を、`json.Unmarshal`
 - 違反は `Violation{Path, Code, Message}` で、順序は決定的（深さ優先、オブジェクト内は 型 → 必須キー → 宣言済みプロパティ → 追加プロパティ、各キーは辞書順、配列は添字順）。同じ入力から常に同じ出力が得られるため、ログ比較や生成元へのフィードバックに使えます。
 - JSON の `null` は「存在しない」として扱います。
 
+### 3.4 httpsent — 送ったかどうかの判定
+
+`sendguard` が正しく動くには、送信の失敗を「確実に何も起きていない」と「起きたかもしれない」に分けられなければなりません。httpsent はその境界を **要求のヘッダが接続に書き込まれたか**（`httptrace.ClientTrace.WroteHeaders`）で決めます。
+
+| 失敗の時点 | 例 | 分類 | sendguard での結果 |
+| --- | --- | --- | --- |
+| 書き込み前 | 名前解決・接続・TLS の失敗、接続拒否、送る前のキャンセル | `*NotSentError`（`Definite() == true`） | `Failed`（相手は何もしていない。新しい ID で再送してよい） |
+| 書き込み後 | 応答待ちのタイムアウト、接続のリセット、応答の読み取り失敗 | 元のエラーのまま | `Unknown`（照合が必要） |
+| 応答あり 4xx（408 以外） | 入力不正、権限なし、回数制限 | `StatusError`（`Definite() == true`） | `Failed` |
+| 応答あり 408・5xx | 相手側の障害 | `StatusError`（`Definite() == false`） | `Unknown` |
+
+- `Do` は `(resp, sent, err)` を返し、`Classify(err, sent)` で上の分類にします。送信を自分で行わない場合は `Track` で要求に印を付けます（既存のトレースフックは残ります）。
+- 429 は「処理の前に拒否される」として確定扱いです。サービスが別の振る舞いを文書化している場合は、その状態コードだけ呼び出し側で分類してください。
+
+### 3.5 stubnet — 外に出ない通信
+
+テストやドライラン（本物の外部サービスに接続しない試運転）で、アダプタの HTTP のコードをそのまま動かすための `http.RoundTripper` です。
+
+- **既定で拒否**: `Handle` で登録した宛先（ホスト名、ポートと大文字小文字は無視）だけが、プロセス内の `http.Handler` で応答されます。それ以外は `ErrBlocked` で失敗し、記録に残ります。`InstallDefault` で `http.DefaultTransport` にも設定でき、`http.DefaultClient` を使うコードも外に出られません。
+- **本物の送信と同じ合図**: ハンドラを呼ぶ前に `WroteHeaders` / `WroteRequest` のフックを呼びます。拒否と `Refuse` はフックの前に失敗します。こうしないと、httpsent のような「送ったか」の判定が模擬の環境だけ誤り、本番で起きる「結果不明」を試験できません。
+- **障害の再現**: `Inject(host, f)` で次の 1 回を失敗させます。`Refuse`（届かない）、`Lose`（ハンドラは実行される＝相手は処理したが、応答が失われる）、`Status(code)`（ハンドラを呼ばずに状態コードを返す）。
+- **記録**: 方法・ホスト・パス・状態・障害だけを残し、件数に上限があります。クエリ文字列とヘッダは記録しません（トークンが含まれ得るため）。
+- ハンドラの panic は「届いた後に接続が切れた」として、送信後の失敗になります。
+
+`go/stubnet` のテストには、`sendguard` ＋ `httpsent` ＋ `stubnet` の組み合わせで「どの障害でも 2 回目の送信は起きない」ことの確認があります。
+
 ## 4. 品質ゲート
 
 | 項目 | ローカル | CI（ubuntu-latest） |
@@ -93,4 +120,4 @@ LLM などの信頼できない生成元の構造化出力を、`json.Unmarshal`
 
 ## English summary
 
-The private application depends one-way on version-pinned artifacts of this repository. `ffimg` reads at most `max_bytes+1` bytes, detects the format from magic bytes, pre-scans headers (dimensions, metadata, JPEG EOI) without allocating, decodes under `image::Limits`, and for `derive` converts to 8-bit, resizes with Lanczos3 without upscaling, re-encodes pixels only (so metadata cannot survive), and writes via temp file + fsync + rename. `sendguard` guarantees at-most-once sends: CAS claim, `Submitting` persisted before sending, ambiguous outcomes become `Unknown`, which only `Resolve` can leave. `structcheck` validates decoded JSON with deterministic violation ordering.
+The private application depends one-way on version-pinned artifacts of this repository. `ffimg` reads at most `max_bytes+1` bytes, detects the format from magic bytes, pre-scans headers (dimensions, metadata, JPEG EOI) without allocating, decodes under `image::Limits`, and for `derive` converts to 8-bit, resizes with Lanczos3 without upscaling, re-encodes pixels only (so metadata cannot survive), and writes via temp file + fsync + rename. `sendguard` guarantees at-most-once sends: CAS claim, `Submitting` persisted before sending, ambiguous outcomes become `Unknown`, which only `Resolve` can leave. `structcheck` validates decoded JSON with deterministic violation ordering. `httpsent` separates failures before the request was written (definite, `*NotSentError`) from later ones (ambiguous), and classifies error statuses. `stubnet` is a deny-by-default `http.RoundTripper` for tests and dry runs that answers registered hosts in process, fires the client trace hooks like a real transport, and injects `Refuse` / `Lose` / `Status` faults.

@@ -151,7 +151,15 @@ if ($Check) {
     }
 
     Invoke-CheckStep 'Rust：整形（cargo fmt --check）' '.' { & $cargo fmt --all --check | Out-Host; $LASTEXITCODE -eq 0 }
-    Invoke-CheckStep 'Rust：lint（cargo clippy -D warnings）' '.' { & $cargo clippy --locked --all-targets -- -D warnings | Out-Host; $LASTEXITCODE -eq 0 }
+    Invoke-CheckStep 'Rust：lint（cargo clippy -D warnings）' '.' {
+        # clippy は前回の結果を使い回すことがあり、Rust を更新して増えた指摘を見逃す（CI は毎回まっさら）。
+        # このリポジトリの Rust ソースの更新時刻だけを新しくして、自前のクレートを検査し直させる
+        # （依存ライブラリの結果はそのまま使うので速い）。
+        $now = Get-Date
+        Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'rust') -Recurse -Filter '*.rs' | ForEach-Object { $_.LastWriteTime = $now }
+        & $cargo clippy --locked --all-targets -- -D warnings | Out-Host
+        $LASTEXITCODE -eq 0
+    }
     Invoke-CheckStep 'Rust：テスト（cargo test）' '.' { & $cargo test --locked | Out-Host; $LASTEXITCODE -eq 0 }
     Invoke-CheckStep 'Go：整形（gofmt -l）' 'go' {
         $gofmt = Join-Path (Split-Path -Parent $go) 'gofmt.exe'

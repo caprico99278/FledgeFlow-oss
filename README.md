@@ -17,6 +17,8 @@ English summary: [below](#english).
 | [`go/fsm/`](go/fsm/) | Go | 汎用の有限状態遷移テーブル `fsm.Table[S]` |
 | [`go/sendguard/`](go/sendguard/) | Go | 「外部システムに届いたか分からない」送信を**最大 1 回**に抑えるプロトコル（CAS ストア＋ `Guard`） |
 | [`go/structcheck/`](go/structcheck/) | Go | デコード済み JSON（`map[string]any`）を小さな宣言的スキーマで検証。LLM の構造化出力の検査向け |
+| [`go/httpsent/`](go/httpsent/) | Go | HTTP の要求が**相手に届いた可能性があるか**を判定し、失敗を「確実に何も起きていない」（再試行してよい）と「起きたかもしれない」（照合が必要）に分ける。`sendguard` の `Definite` にそのまま渡せる |
+| [`go/stubnet/`](go/stubnet/) | Go | テスト・ドライラン用の `http.RoundTripper`。登録した宛先だけをプロセス内のハンドラで応答し、それ以外への接続はすべて拒否して記録する。「届いたが応答が失われた」などの障害を再現できる |
 | [`docs/architecture.md`](docs/architecture.md) | – | 設計・不変条件・利用側との境界 |
 | [`docs/benchmarks.md`](docs/benchmarks.md) | – | 計測結果と計測条件 |
 | [`scripts/leakcheck.sh`](scripts/leakcheck.sh) | Bash | 公開してはいけない語・鍵・画像ファイルの混入検査 |
@@ -88,6 +90,21 @@ Go モジュールは `github.com/caprico99278/FledgeFlow-oss/go`（`go 1.27`、
 | `usage` | 1 | 引数の誤り |
 | `internal` | 1 | 想定外の内部エラー（panic を捕捉） |
 
+## 起動ファイル（Windows）
+
+| ファイル | 内容 |
+| --- | --- |
+| `start.cmd`（ダブルクリック） | Rust / Go の版を確認 → `ffimg` をリリースビルド → `ffimg version` を Cargo.toml と照合 → 実行時に生成した合成画像で `inspect` / `derive` / 不正な入力の拒否を実際に試して結果を表示 |
+| `check.cmd`（ダブルクリック） | PR 前の検査一式（下の「ビルドとテスト」と同じ）を実行し、結果を一覧で表示。1 つでも失敗すると終了コード 1 |
+| `.\start.ps1 -Image <画像> [-MaxEdge 1600] [-Format jpeg\|png\|webp]` | 手元の画像を検証し、縮小・メタデータ除去した派生画像を `samples\` に作る（元の画像は変更しない） |
+| `.\start.ps1 -Bench` | ベンチマーク（`ffimg` は合成画像 4000×3000、Go は全パッケージ） |
+| `.\start.ps1 -Update` | Rust（`rustup update stable`）と Go（winget）に新しい版があれば、確認のうえ更新 |
+| `.\start.ps1 -CheckDeps` | Rust クレートの新しい版（`cargo update --dry-run`）と既知の脆弱性（`cargo audit` / `govulncheck`、入っていれば）を報告。更新はしない |
+
+- 必要な版は `rust/ffimg/Cargo.toml` の `rust-version` と `go/go.mod` の `go` 行から読みます。新しい版の確認（`rustup check` / go.dev）は 1 日 1 回で、`-NoUpdateCheck` で止め、`-CheckLatest` で今すぐ確認します。`-SkipBuild` は確認とビルドを省きます。
+- 作った画像は `samples\`（Git の管理外）に置きます。リポジトリには何も追加しません。
+- 混入検査は Git for Windows の bash で実行します（`System32ash.exe` は WSL のため使いません）。Go の `-race` は C コンパイラがあるときだけ実行し、無ければ通常のテストにします（CI の Linux では常に `-race`）。
+
 ## ビルドとテスト
 
 必要なもの: Rust（stable、1.88 以上）、Go 1.27。
@@ -112,6 +129,7 @@ cd go
 go vet ./...
 go test ./...                    # CI（Linux）では go test -race ./...
 go test -run '^$' -bench . -benchmem ./structcheck
+# Windows では -race に C コンパイラ（cgo）が必要です。無い場合は CI（Linux）の結果を見てください。
 
 # 公開前の混入検査
 bash scripts/leakcheck.sh
@@ -144,6 +162,9 @@ Apache License 2.0。[LICENSE](LICENSE) と [NOTICE](NOTICE) を参照してく�
 - **`go/fsm`** — generic transition table `fsm.Table[S]` with `Can`, `Check` (typed `*TransitionError[S]`) and `Terminal`.
 - **`go/sendguard`** — at-most-once protocol for side effects whose delivery may be ambiguous: CAS claim, `Submitting` persisted before sending, outcomes mapped to `Succeeded` / `Failed` (definite rejection) / `Unknown` (everything ambiguous, never retried automatically; reconcile with `Resolve`). Includes an in-memory reference store.
 - **`go/structcheck`** — validates decoded JSON (`map[string]any`) against a tiny declarative schema and returns deterministically ordered violations; meant for checking LLM structured output.
+- **`go/httpsent`** — tells whether an HTTP request may have reached the server (via the `WroteHeaders` trace hook): failures before sending become `*NotSentError` (definite, safe to retry), later failures stay ambiguous; `DefiniteStatus` / `StatusError` classify error statuses (4xx except 408 definite, 408/5xx ambiguous). Plugs into `sendguard`.
+- **`go/stubnet`** — `http.RoundTripper` for tests and dry runs: registered hosts are answered in process by an `http.Handler`, every other destination is refused and recorded (also for `http.DefaultClient` via `InstallDefault`). Injectable faults: `Refuse` (never sent), `Lose` (delivered, response lost), `Status(code)`. Fires the client trace hooks like a real transport; the journal never records query strings or headers.
 
 Build/test: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`, `cd go && go vet ./... && go test ./...`, `bash scripts/leakcheck.sh`.
+Windows launchers: `start.cmd` checks the Rust/Go versions, builds `ffimg`, matches `ffimg version` against Cargo.toml and tries it on a synthetic image; `check.cmd` runs every pre-PR check with a summary (`.\start.ps1 -Check`). Other modes: `-Image <file>`, `-Bench`, `-Update`, `-CheckDeps`.
 Tags: `ffimg-vX.Y.Z` for the Rust crate/CLI, `go/vX.Y.Z` for the Go module.

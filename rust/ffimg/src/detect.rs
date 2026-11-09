@@ -192,10 +192,11 @@ fn scan_png(d: &[u8]) -> Scan {
     let mut pos = 8;
     while let (Some(len), Some(kind)) = (be32(d, pos), d.get(pos + 4..pos + 8)) {
         let data_start = pos + 8;
-        if kind == b"IHDR" && out.dimensions.is_none() {
-            if let (Some(w), Some(h)) = (be32(d, data_start), be32(d, data_start + 4)) {
-                out.dimensions = Some((w, h));
-            }
+        if kind == b"IHDR"
+            && out.dimensions.is_none()
+            && let (Some(w), Some(h)) = (be32(d, data_start), be32(d, data_start + 4))
+        {
+            out.dimensions = Some((w, h));
         }
         match kind {
             b"eXIf" | b"iTXt" | b"tEXt" | b"zTXt" | b"iCCP" => out.has_metadata = true,
@@ -233,19 +234,19 @@ fn scan_webp(d: &[u8]) -> Scan {
                 }
             }
             b"VP8 " if out.dimensions.is_none() => {
-                if body.get(3..6) == Some(&[0x9D, 0x01, 0x2A]) {
-                    if let (Some(w), Some(h)) = (le16(body, 6), le16(body, 8)) {
-                        out.dimensions = Some((u32::from(w & 0x3FFF), u32::from(h & 0x3FFF)));
-                    }
+                if body.get(3..6) == Some(&[0x9D, 0x01, 0x2A])
+                    && let (Some(w), Some(h)) = (le16(body, 6), le16(body, 8))
+                {
+                    out.dimensions = Some((u32::from(w & 0x3FFF), u32::from(h & 0x3FFF)));
                 }
             }
             b"VP8L" if out.dimensions.is_none() => {
-                if body.first() == Some(&0x2F) {
-                    if let Some(bits) = le32(body, 1) {
-                        let w = (bits & 0x3FFF) + 1;
-                        let h = ((bits >> 14) & 0x3FFF) + 1;
-                        out.dimensions = Some((w, h));
-                    }
+                if body.first() == Some(&0x2F)
+                    && let Some(bits) = le32(body, 1)
+                {
+                    let w = (bits & 0x3FFF) + 1;
+                    let h = ((bits >> 14) & 0x3FFF) + 1;
+                    out.dimensions = Some((w, h));
                 }
             }
             b"EXIF" | b"XMP " | b"ICCP" => out.has_metadata = true,

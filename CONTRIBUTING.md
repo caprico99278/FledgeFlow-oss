@@ -12,6 +12,8 @@ FledgeFlow-oss への貢献を歓迎します。Issues / Pull Requests は日本
 
 ## PR 前のチェック
 
+Windows では `check.cmd`（または `.\start.ps1 -Check`）で次の一式をまとめて実行できます。
+
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
